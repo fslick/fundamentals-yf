@@ -24,7 +24,12 @@ const symbol = (cliSymbol && cliSymbol.trim()) || equities[Math.floor(Math.rando
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
-async function fetchCashFlowDataTTM(): Promise<CashFlow | null> {
+type CashFlowTTM = {
+	latest: CashFlow;
+	previous: CashFlow | null;
+};
+
+async function fetchCashFlowDataTTM() {
 	const cashFlowData = await yahooFinance.fundamentalsTimeSeries(symbol, {
 		period1: moment().subtract(2, 'years').format('YYYY-MM-DD'),
 		type: 'trailing',
@@ -35,15 +40,23 @@ async function fetchCashFlowDataTTM(): Promise<CashFlow | null> {
 		return null;
 	}
 
-	const mostRecent = cashFlowData.reduce((latest: any, current: any) => {
-		return current.date > latest.date ? current : latest;
-	});
+	const sortedByDate = 
+		[...cashFlowData]
+		.sort((a: any, b: any) => b.date - a.date)
+		.map((item: any) => {
+			const dateInSeconds = item.date < 1e12 ? item.date : item.date / 1000;
+			return { ...item, date: moment.unix(dateInSeconds) } as CashFlow;
+		});
+	const mostRecent = sortedByDate[0]!;
+	const previous = sortedByDate.length > 1 ? sortedByDate[1]! : null;
 
-	const dateInSeconds = mostRecent.date < 1e12 ? mostRecent.date : mostRecent.date / 1000;
-	return {...mostRecent, date: moment.unix(dateInSeconds)};
+	return {
+		latest: mostRecent,
+		previous: previous
+	};
 }
 
-function mapToRecord(quoteSummary: QuoteSummaryResult, cashFlowData: CashFlow | null): unknown {
+function mapToRecord(quoteSummary: QuoteSummaryResult, cashFlowData: CashFlowTTM | null): unknown {
 	return {
 		symbol: quoteSummary.price?.symbol,
 		name: quoteSummary?.longName,
@@ -65,13 +78,13 @@ function mapToRecord(quoteSummary: QuoteSummaryResult, cashFlowData: CashFlow | 
 			return (price - low) / (high - low);
 		})(),
 		freeCashFlowYield: (() => {
-			const fcf = cashFlowData?.freeCashFlow;
+			const fcf = cashFlowData?.latest.freeCashFlow;
 			const marketCap = quoteSummary.price?.marketCap;
 			return fcf && marketCap ? (fcf / marketCap) : undefined;
 		})(),
 		sharesOutstanding: quoteSummary.defaultKeyStatistics?.sharesOutstanding,
 		freeCashFlowPerShare: (() => {
-			const fcf = cashFlowData?.freeCashFlow;
+			const fcf = cashFlowData?.latest.freeCashFlow;
 			const sharesOutstanding = quoteSummary.defaultKeyStatistics?.sharesOutstanding;
 			return fcf && sharesOutstanding ? fcf / sharesOutstanding : undefined;
 		})(),
