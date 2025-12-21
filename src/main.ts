@@ -1,13 +1,16 @@
 import moment from "moment";
 import YahooFinance from "yahoo-finance2";
+import type { HistoricalHistoryResult } from "yahoo-finance2/modules/historical";
 import type { QuoteSummaryResult } from "yahoo-finance2/modules/quoteSummary-iface";
-import type { CashFlow } from "./types.js";
+import type { StatementPayload } from "./types";
+import _ from "lodash";
+import type { ChartResultArrayQuote } from "yahoo-finance2/modules/chart";
 
 const equities = [
-	"SPY",
-	"QQQ",
-	"EUNL.DE",
-	"URTH",
+	// "SPY",
+	// "QQQ",
+	// "EUNL.DE",
+	// "URTH",
 	"NVDA",
 	"AAPL",
 	"MSFT",
@@ -22,41 +25,52 @@ const equities = [
 const cliSymbol = process.argv[2];
 const symbol = (cliSymbol && cliSymbol.trim()) || equities[Math.floor(Math.random() * equities.length)]!;
 
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
-type CashFlowTTM = {
-	latest: CashFlow;
-	previous: CashFlow | null;
-};
+async function fetchPrices(symbol: string) {
+	const chart = await yahooFinance.chart(symbol, {
+		period1: moment().subtract(2, "years").format("YYYY-MM-DD"),
+		period2: moment().toDate(),
+	});
+	return chart.quotes;
+}
 
-async function fetchCashFlowDataTTM() {
-	const cashFlowData = await yahooFinance.fundamentalsTimeSeries(symbol, {
-		period1: moment().subtract(2, 'years').format('YYYY-MM-DD'),
-		type: 'trailing',
-		module: 'cash-flow'
+async function fetchQuarterlyStatements(symbol: string) {
+	const response: unknown[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+		period1: moment().subtract(2, "years").format("YYYY-MM-DD"),
+		type: "quarterly",
+		module: "all"
 	}, { validateResult: false });
+	return response.filter((item: any) => item.TYPE === "ALL") as StatementPayload[];
+}
 
-	if (cashFlowData.length === 0) {
+function calculateTrailingStatistics(allStatements: StatementPayload[], prices: ChartResultArrayQuote[]) {
+	if (allStatements.length < 4) {
 		return null;
 	}
 
-	const sortedByDate = 
-		[...cashFlowData]
-		.sort((a: any, b: any) => b.date - a.date)
-		.map((item: any) => {
-			const dateInSeconds = item.date < 1e12 ? item.date : item.date / 1000;
-			return { ...item, date: moment.unix(dateInSeconds) } as CashFlow;
-		});
-	const mostRecent = sortedByDate[0]!;
-	const previous = sortedByDate.length > 1 ? sortedByDate[1]! : null;
-
+	const statements = _(allStatements).sortBy(s => moment(s.date).valueOf()).takeRight(4).value();
+	const lastStatement = statements[statements.length - 1]!;
+	const sharesOutstanding = lastStatement.ordinarySharesNumber!;
+	const netIncome = _(statements).map(statement => statement.netIncome).sum();
+	const freeCashFlow = _(statements).map(statement => statement.freeCashFlow).sum();
+	const date = moment(lastStatement.date);
+	const close = prices
+		.filter(price => moment(price.date).isSame(date, "day") || moment(price.date).isBefore(date, "day"))
+		.sort((a, b) => moment(b.date).diff(moment(a.date)))[0]?.close!;
+	const marketCap = close * sharesOutstanding;
 	return {
-		latest: mostRecent,
-		previous: previous
+		date: date.toDate(),
+		close: close,
+		sharesOutstanding: sharesOutstanding,
+		marketCap: marketCap,
+		pe: marketCap / netIncome,
+		fcfYield : freeCashFlow / marketCap
 	};
 }
 
-function mapToRecord(quoteSummary: QuoteSummaryResult, cashFlowData: CashFlowTTM | null): unknown {
+function mapToRecord(quoteSummary: QuoteSummaryResult): unknown {
+	const cashFlowData: any = null; // TODO awaits refactoring
 	return {
 		symbol: quoteSummary.price?.symbol,
 		name: quoteSummary?.longName,
@@ -67,7 +81,7 @@ function mapToRecord(quoteSummary: QuoteSummaryResult, cashFlowData: CashFlowTTM
 		trailingPE: quoteSummary.summaryDetail?.trailingPE,
 		forwardPE: quoteSummary.summaryDetail?.forwardPE,
 		nextEarningsDate: (() => {
-			const earningsDateString = quoteSummary.calendarEvents?.earnings.earningsDate[0]?.toISOString().split('T')[0];
+			const earningsDateString = quoteSummary.calendarEvents?.earnings.earningsDate[0]?.toISOString().split("T")[0];
 			const earningsDate = earningsDateString ? moment(earningsDateString) : undefined;
 			return earningsDate && earningsDate > moment() ? earningsDateString : undefined;
 		})(),
@@ -109,23 +123,18 @@ async function main() {
 	console.log(JSON.stringify(quoteSummary, null, 4));
 	console.log("\n");
 
-	const cashFlow = await fetchCashFlowDataTTM();
-	console.log("CASH FLOW");
-	console.log(JSON.stringify(cashFlow, null, 4));
+	const quarterlyStatements = await fetchQuarterlyStatements(symbol);
+	console.log("QUARTERLY STATEMENTS");
+	console.log(JSON.stringify(quarterlyStatements, null, 4));
 	console.log("\n");
 
-	const financialsData = await yahooFinance.fundamentalsTimeSeries(symbol, {
-		period1: moment().subtract(2, 'years').format('YYYY-MM-DD'),
-		type: 'trailing',
-		module: "financials"
-	}, { validateResult: false });
-	console.log("FINANCIALS");
-	console.log(JSON.stringify(financialsData, null, 4));
+	const prices = await fetchPrices(symbol);
+	const trailing = calculateTrailingStatistics(quarterlyStatements, prices);
+	console.log("TRAILING STATISTICS");
+	console.log(JSON.stringify(trailing, null, 4));
 	console.log("\n");
 
-	console.log(financialsData.map((e: any) => new Date(e.date * (e.date < 1e12 ? 1000 : 1))));
-
-	const record = mapToRecord(quoteSummary, cashFlow);
+	const record = mapToRecord(quoteSummary);
 	console.log("RESULT");
 	console.log(JSON.stringify(record, null, 4));
 }
