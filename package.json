@@ -1,5 +1,5 @@
 {
-  "name": "fundamentals",
+  "name": "fundamentals-yf",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -21,8 +21,11 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@json2csv/node": "^7.0.6",
+    "csv-parse": "^6.1.0",
     "lodash": "^4.17.21",
     "moment": "^2.30.1",
-    "yahoo-finance2": "^3.10.2"
+    "p-limit": "^7.2.0",
+    "yahoo-finance2": "^3.11.2"
   }
 }

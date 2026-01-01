@@ -1,12 +1,16 @@
-type PeriodType = "3M" | "12M";
+import type moment from "moment";
+
+export type PeriodType = "3M" | "12M" | "TTM";
 
 export type QuarterlyStatement = StatementPayload<"3M">;
 
 export type AnnualStatement = StatementPayload<"12M">;
 
+export type TrailingStatement = StatementPayload<"TTM">;
+
 export interface StatementPayload<T extends PeriodType> {
     TYPE: "ALL"
-    date: string;
+    date: moment.Moment
     sellingGeneralAndAdministration?: number;
     periodType: T;
     otherEquityAdjustments?: number;

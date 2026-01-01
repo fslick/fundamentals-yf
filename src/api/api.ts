@@ -1,0 +1,163 @@
+import { promises as fs } from "fs";
+import moment from "moment";
+import YahooFinance from "yahoo-finance2";
+import type { FundamentalsTimeSeriesAllResult } from "yahoo-finance2/modules/fundamentalsTimeSeries";
+import type { AnnualStatement, QuarterlyStatement, TrailingStatement } from "../types";
+import { log, memoize } from "../utils";
+
+const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"], });
+
+function payloadDateToMoment(dateInput: Date | number) {
+    return typeof dateInput === "number" ? moment.unix(dateInput) : moment(dateInput);
+}
+
+async function saveJsonFile(symbol: string, type: string, data: any) {
+    await fs.mkdir("./output/payloads", { recursive: true });
+    await fs.writeFile(`./output/payloads/${symbol}-${type}.json`, JSON.stringify(data, null, 4));
+}
+
+const defaultPeriod1 = moment().subtract(5, "years").subtract(1, "month");
+
+const __fetchPrices = memoize(async (symbol: string) => {
+    const chart = await yahooFinance.chart(symbol, {
+        period1: defaultPeriod1.format("YYYY-MM-DD"),
+        period2: moment().format("YYYY-MM-DD"),
+    });
+    log(`${symbol} >> Retrieved prices`);
+    return chart.quotes;
+});
+
+const __fetchSummary = async (symbol: string) => {
+    const quoteSummary = await yahooFinance.quoteSummary(symbol,
+        {
+            modules:
+                [
+                    "defaultKeyStatistics",
+                    "quoteType",
+                    "earnings",
+                    "price",
+                    "earningsTrend",
+                    "summaryDetail",
+                    "financialData",
+                ]
+        });
+    await saveJsonFile(symbol, "quoteSummary", quoteSummary);
+    log(`${symbol} >> Retrieved quoteSummary`);
+    return quoteSummary;
+};
+
+const __fetchSummaryWithAllModules = async (symbol: string) => {
+    const quoteSummary = await yahooFinance.quoteSummary(symbol,
+        {
+            modules:
+                [
+                    "assetProfile",
+                    "calendarEvents",
+                    "defaultKeyStatistics",
+                    "earnings",
+                    "earningsHistory",
+                    "earningsTrend",
+                    "financialData",
+                    "fundOwnership",
+                    "fundPerformance",
+                    "fundProfile",
+                    "indexTrend",
+                    "industryTrend",
+                    "insiderHolders",
+                    "insiderTransactions",
+                    "institutionOwnership",
+                    "majorDirectHolders",
+                    "majorHoldersBreakdown",
+                    "netSharePurchaseActivity",
+                    "price",
+                    "quoteType",
+                    "recommendationTrend",
+                    "secFilings",
+                    "sectorTrend",
+                    "summaryDetail",
+                    "summaryProfile",
+                    "topHoldings",
+                    "upgradeDowngradeHistory"
+                ]
+        }, { validateResult: false });
+    await saveJsonFile(symbol, "quoteSummaryAllModules", quoteSummary);
+    log(`${symbol} >> Retrieved quoteSummary (all modules)`);
+    return quoteSummary;
+};
+
+const __fetchQuarterlyStatements = async (symbol: string) => {
+    const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+        period1: moment().subtract(2, "years").format("YYYY-MM-DD"),
+        type: "quarterly",
+        module: "all"
+    }, { validateResult: false });
+    await saveJsonFile(symbol, "quarterlyStatements", response);
+    log(`${symbol} >> Retrieved quarterly statements`);
+    return response
+        .filter(item => item.TYPE === "ALL")
+        .map(item => ({ ...item, date: payloadDateToMoment(item.date) })) as QuarterlyStatement[];
+};
+
+const __fetchAnnualStatements = async (symbol: string) => {
+    const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+        period1: moment().subtract(5, "years").format("YYYY-MM-DD"),
+        period2: moment().format("YYYY-MM-DD"),
+        type: "annual",
+        module: "all"
+    }, { validateResult: false });
+    await saveJsonFile(symbol, "annualStatements", response);
+    log(`${symbol} >> Retrieved annual statements`);
+    return response
+        .filter(item => item.TYPE === "ALL")
+        .map(item => ({ ...item, date: payloadDateToMoment(item.date) })) as AnnualStatement[];
+};
+
+const __fetchTrailingStatement = async (symbol: string) => {
+    const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+        period1: moment().subtract(2, "years").format("YYYY-MM-DD"),
+        type: "trailing",
+        module: "all"
+    }, { validateResult: false });
+    await saveJsonFile(symbol, "trailingStatement", response);
+    log(`${symbol} >> Retrieved trailing statement`);
+    return response
+        .filter(item => item.TYPE === "ALL")
+        .map(item => ({ ...item, date: payloadDateToMoment(item.date) })) as unknown as TrailingStatement[];
+};
+
+async function withRetries<T>(fn: () => Promise<T>, symbol: string, methodName: string, retries = 5, delay = 2000): Promise<T> {
+    try {
+        return await fn();
+    } catch (error: any) {
+        if (retries > 0 && (error?.code === 429 || error?.message?.includes("Too Many Requests"))) {
+            log(`${symbol} >> ${methodName} >> Rate limited. Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return withRetries(fn, symbol, methodName, retries - 1, delay * 2);
+        }
+        throw error;
+    }
+}
+
+export async function fetchPrices(symbol: string) {
+    return withRetries(() => __fetchPrices(symbol), symbol, "fetchPrices");
+}
+
+export async function fetchSummary(symbol: string) {
+    return withRetries(() => __fetchSummary(symbol), symbol, "fetchSummary");
+}
+
+export async function fetchSummaryWithAllModules(symbol: string) {
+    return withRetries(() => __fetchSummaryWithAllModules(symbol), symbol, "fetchSummaryWithAllModules");
+}
+
+export async function fetchQuarterlyStatements(symbol: string) {
+    return withRetries(() => __fetchQuarterlyStatements(symbol), symbol, "fetchQuarterlyStatements");
+}
+
+export async function fetchAnnualStatements(symbol: string) {
+    return withRetries(() => __fetchAnnualStatements(symbol), symbol, "fetchAnnualStatements");
+}
+
+export async function fetchTrailingStats(symbol: string) {
+    return withRetries(() => __fetchTrailingStatement(symbol), symbol, "fetchTrailingStats");
+}
