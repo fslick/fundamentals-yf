@@ -59,12 +59,14 @@ interface StatisticsInput {
 	eps: number;
 	totalCash: number | undefined;
 	totalDebt: number | undefined;
+	totalRevenue: number | undefined;
+	operatingIncome: number | undefined;
 }
 
 function calculateValuationMetrics(input: StatisticsInput) {
 	const {
 		close, sharesOutstanding, dilutedSharesOutstanding, netIncome, freeCashFlow,
-		stockBasedCompensation, eps, date, totalCash, totalDebt
+		stockBasedCompensation, eps, date, totalCash, totalDebt, totalRevenue, operatingIncome
 	} = input;
 
 	const marketCap = close * sharesOutstanding;
@@ -91,7 +93,9 @@ function calculateValuationMetrics(input: StatisticsInput) {
 			? (freeCashFlow - stockBasedCompensation) / dilutedSharesOutstanding
 			: null,
 		totalCash,
-		totalDebt
+		totalDebt,
+		totalRevenue,
+		operatingIncome
 	};
 }
 
@@ -109,6 +113,8 @@ function calculateTrailingStatistics(allStatements: QuarterlyStatement[], prices
 	const netIncome = _(statements).map(statement => statement.netIncome).sum();
 	const freeCashFlow = _(statements).map(statement => statement.freeCashFlow).sum();
 	const stockBasedCompensation = _(statements).map(statement => statement.stockBasedCompensation).sum();
+	const totalRevenue = _(statements).map(statement => statement.totalRevenue).sum();
+	const operatingIncome = _(statements).map(statement => statement.operatingIncome).sum();
 	const eps = _(statements).sumBy(s => (s.netIncome && sharesOutstanding) ? s.netIncome / sharesOutstanding : 0);
 	const date = lastStatement.date;
 	const close = priceOn(date, prices);
@@ -123,7 +129,9 @@ function calculateTrailingStatistics(allStatements: QuarterlyStatement[], prices
 		stockBasedCompensation,
 		eps,
 		totalCash: lastStatement.cashCashEquivalentsAndShortTermInvestments || lastStatement.cashAndCashEquivalents,
-		totalDebt: lastStatement.totalDebt
+		totalDebt: lastStatement.totalDebt,
+		totalRevenue,
+		operatingIncome
 	});
 }
 
@@ -162,7 +170,9 @@ async function getTTMStatistics(
 		stockBasedCompensation: statement.stockBasedCompensation || 0,
 		eps: statement.basicEPS!,
 		totalCash: statement.cashCashEquivalentsAndShortTermInvestments || statement.cashAndCashEquivalents,
-		totalDebt: statement.totalDebt
+		totalDebt: statement.totalDebt,
+		totalRevenue: statement.totalRevenue,
+		operatingIncome: statement.operatingIncome
 	});
 }
 
@@ -291,12 +301,13 @@ async function processSymbol(symbol: string) {
 			fcfPerShare: thisPeriod?.freeCashFlow && sharesOutstanding ? thisPeriod.freeCashFlow / sharesOutstanding : null,
 			fcfPerShareAdjusted: thisPeriod?.fcfPerShareAdjusted ?? null,
 			trailingEPS: quoteSummary.defaultKeyStatistics!.trailingEps,
-			forwardEPS: quoteSummary.defaultKeyStatistics!.forwardEps,
-			priceToSales: quoteSummary.summaryDetail!.priceToSalesTrailing12Months,
+			forwardEPS: quoteSummary.defaultKeyStatistics!.forwardEps
 		},
 		thisPeriod,
 		previousPeriod,
-		growth: {
+		marginsAndGrowth: {
+			operatingMargin: thisPeriod?.operatingIncome && thisPeriod?.totalRevenue ? thisPeriod.operatingIncome / thisPeriod.totalRevenue : null,
+			profitMargin: thisPeriod?.netIncome && thisPeriod?.totalRevenue ? thisPeriod.netIncome / thisPeriod.totalRevenue : null,
 			earningsAnnualGrowth: quoteSummary.financialData?.earningsGrowth,
 			quarterlyEarningsGrowth: quoteSummary.defaultKeyStatistics?.earningsQuarterlyGrowth,
 			quarterlyRevenueGrowth: quoteSummary.financialData?.revenueGrowth,
@@ -350,20 +361,12 @@ async function saveResultsToCsv(results: Awaited<ReturnType<typeof processSymbol
 			const isEmptyObject = _.isPlainObject(v) && _.isEmpty(v);
 			return !(withoutValue || isEmptyObject);
 		})
+		.sortBy(item => item.symbol)
 		.value();
 
 	const symbolKeyValuesPath = "./output/symbolKeyValues.csv";
 	await saveToCsv(symbolKeyValues, symbolKeyValuesPath);
 	log(`File with key values available at ${symbolKeyValuesPath}`);
-}
-
-async function processAndSave(symbols: string[]) {
-	const results: Awaited<ReturnType<typeof processSymbol>>[] = [];
-	for (const symbol of symbols) {
-		results.push(await processSymbol(symbol));
-	}
-	await saveResultsToCsv(results);
-	return results;
 }
 
 async function processAndSaveParallel(symbols: string[], parallelism = 2) {
