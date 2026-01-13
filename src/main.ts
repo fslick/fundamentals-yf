@@ -1,21 +1,26 @@
 import _ from "lodash";
-import moment from "moment";
+import { DateTime } from "luxon";
 import pLimit from "p-limit";
 import type { ChartResultArrayQuote } from "yahoo-finance2/modules/chart";
 import { fetchAnnualStatements, fetchPrices, fetchQuarterlyStatements, fetchSummary, fetchTrailingStats } from "./api/api";
-import { parseCsv, saveToCsv } from "./csv";
-import type { AnnualStatement, PeriodType, QuarterlyStatement, StatementPayload } from "./types";
-import { log } from "./utils";
+import { parseCsv, saveToCsv } from "./lib/csv";
+import type { AnnualStatement, PeriodType, QuarterlyStatement, StatementPayload } from "./api/types";
+import { log } from "./lib/utils";
 
-function priceOn(date: moment.Moment, prices: ChartResultArrayQuote[]) {
-	const earliestPrice = _.minBy(prices, p => moment(p.date).valueOf());
-	if (earliestPrice && date.isBefore(moment(earliestPrice.date), "day")) {
-		throw new Error(`Requested date ${date.format("YYYY-MM-DD")} is before the earliest available price date ${moment(earliestPrice.date).format("YYYY-MM-DD")}`);
+function priceOn(date: DateTime, prices: ChartResultArrayQuote[]) {
+	const earliestPrice = _.minBy(prices, p => p.date);
+	const earliestPriceDate = earliestPrice ? DateTime.fromJSDate(earliestPrice.date) : null;
+
+	if (earliestPriceDate && date.startOf("day") < earliestPriceDate.startOf("day")) {
+		throw new Error(`Requested date ${date.toFormat("yyyy-MM-dd")} is before the earliest available price date ${earliestPriceDate.toFormat("yyyy-MM-dd")}`);
 	}
 
 	return prices
-		.filter(price => moment(price.date).isSame(date, "day") || moment(price.date).isBefore(date, "day"))
-		.sort((a, b) => moment(b.date).diff(moment(a.date)))[0]?.close!;
+		.filter(price => {
+			const pDate = DateTime.fromJSDate(price.date);
+			return pDate.hasSame(date, "day") || pDate.startOf("day") < date.startOf("day");
+		})
+		.sort((a, b) => b.date.getTime() - a.date.getTime())[0]?.close!;
 }
 
 async function convertCurrencyInStatements<T extends StatementPayload<PeriodType>>(statements: T[], fromCurrency: string, toCurrency: string): Promise<T[]> {
@@ -49,7 +54,7 @@ async function convertCurrencyInStatements<T extends StatementPayload<PeriodType
 }
 
 interface StatisticsInput {
-	date: moment.Moment;
+	date: DateTime;
 	close: number;
 	sharesOutstanding: number;
 	dilutedSharesOutstanding: number;
@@ -104,7 +109,7 @@ function calculateTrailingStatistics(allStatements: QuarterlyStatement[], prices
 		return null;
 	}
 
-	const statements = _(allStatements).sortBy(s => s.date.valueOf()).takeRight(4).value();
+	const statements = _(allStatements).sortBy(s => s.date).takeRight(4).value();
 	const lastStatement = statements[statements.length - 1]!;
 	const sharesOutstanding = lastStatement.basicAverageShares ?? lastStatement.ordinarySharesNumber;
 	if (!sharesOutstanding) {
@@ -152,7 +157,7 @@ async function getTTMStatistics(
 		return null;
 	}
 
-	const statement = _(ttmStatements).sortBy(s => s.date.valueOf()).last()!;
+	const statement = _(ttmStatements).sortBy(s => s.date).last()!;
 	const close = priceOn(statement.date, prices);
 	const sharesOutstanding = statement.basicAverageShares || statement.ordinarySharesNumber;
 
@@ -181,7 +186,7 @@ function calculateGrowth(statementsInput: (QuarterlyStatement | AnnualStatement)
 		return null;
 	}
 
-	const statements = _(statementsInput).sortBy(s => s.date.valueOf()).takeRight(4).value();
+	const statements = _(statementsInput).sortBy(s => s.date).takeRight(4).value();
 	const firstStatement = statements[0];
 	const lastStatement = statements[statements.length - 1];
 
@@ -240,7 +245,7 @@ async function processSymbol(symbol: string) {
 
 	const previousPeriod = (() => {
 		const previousQuarterStatements = _(quarterlyStatements)
-			.sortBy(s => s.date.valueOf())
+			.sortBy(s => s.date)
 			.dropRight(1)
 			.takeRight(4)
 			.value();
@@ -332,7 +337,7 @@ async function processSymbol(symbol: string) {
 function flattenObject(obj: any, prefix = ""): any {
 	return Object.keys(obj).reduce((acc: any, k: string) => {
 		const pre = prefix.length ? prefix + "." : "";
-		if (typeof obj[k] === "object" && obj[k] !== null && !Array.isArray(obj[k]) && !(obj[k] instanceof Date) && !moment.isMoment(obj[k])) {
+		if (typeof obj[k] === "object" && obj[k] !== null && !Array.isArray(obj[k]) && !(obj[k] instanceof Date) && !DateTime.isDateTime(obj[k])) {
 			Object.assign(acc, flattenObject(obj[k], pre + k));
 		} else {
 			acc[pre + k] = obj[k];

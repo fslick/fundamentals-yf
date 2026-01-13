@@ -1,14 +1,14 @@
 import { promises as fs } from "fs";
-import moment from "moment";
+import { DateTime } from "luxon";
 import YahooFinance from "yahoo-finance2";
 import type { FundamentalsTimeSeriesAllResult } from "yahoo-finance2/modules/fundamentalsTimeSeries";
-import type { AnnualStatement, QuarterlyStatement, TrailingStatement } from "../types";
-import { log, memoize } from "../utils";
+import type { AnnualStatement, QuarterlyStatement, TrailingStatement } from "./types";
+import { log, memoize } from "../lib/utils";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"], });
 
 function payloadDateToMoment(dateInput: Date | number) {
-    return typeof dateInput === "number" ? moment.unix(dateInput) : moment(dateInput);
+    return typeof dateInput === "number" ? DateTime.fromSeconds(dateInput) : DateTime.fromJSDate(dateInput);
 }
 
 async function saveJsonFile(symbol: string, type: string, data: any) {
@@ -16,12 +16,12 @@ async function saveJsonFile(symbol: string, type: string, data: any) {
     await fs.writeFile(`./output/payloads/${symbol}-${type}.json`, JSON.stringify(data, null, 4));
 }
 
-const defaultPeriod1 = moment().subtract(5, "years").subtract(1, "month");
+const defaultPeriod1 = DateTime.now().minus({ years: 5, months: 1 });
 
 const __fetchPrices = memoize(async (symbol: string) => {
     const chart = await yahooFinance.chart(symbol, {
-        period1: defaultPeriod1.format("YYYY-MM-DD"),
-        period2: moment().format("YYYY-MM-DD"),
+        period1: defaultPeriod1.toFormat("yyyy-MM-dd"),
+        period2: DateTime.now().toFormat("yyyy-MM-dd"),
     });
     log(`${symbol} >> Retrieved prices`);
     return chart.quotes;
@@ -87,7 +87,7 @@ const __fetchSummaryWithAllModules = async (symbol: string) => {
 
 const __fetchQuarterlyStatements = async (symbol: string) => {
     const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
-        period1: moment().subtract(2, "years").format("YYYY-MM-DD"),
+        period1: DateTime.now().minus({ years: 2 }).toFormat("yyyy-MM-dd"),
         type: "quarterly",
         module: "all"
     }, { validateResult: false });
@@ -100,8 +100,8 @@ const __fetchQuarterlyStatements = async (symbol: string) => {
 
 const __fetchAnnualStatements = async (symbol: string) => {
     const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
-        period1: moment().subtract(5, "years").format("YYYY-MM-DD"),
-        period2: moment().format("YYYY-MM-DD"),
+        period1: DateTime.now().minus({ years: 5 }).toFormat("yyyy-MM-dd"),
+        period2: DateTime.now().toFormat("yyyy-MM-dd"),
         type: "annual",
         module: "all"
     }, { validateResult: false });
@@ -114,7 +114,7 @@ const __fetchAnnualStatements = async (symbol: string) => {
 
 const __fetchTrailingStatement = async (symbol: string) => {
     const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
-        period1: moment().subtract(2, "years").format("YYYY-MM-DD"),
+        period1: DateTime.now().minus({ years: 2 }).toFormat("yyyy-MM-dd"),
         type: "trailing",
         module: "all"
     }, { validateResult: false });

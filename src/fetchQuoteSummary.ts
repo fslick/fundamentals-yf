@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import { fetchSummaryWithAllModules } from "./api/api";
-import { log } from "./utils";
+import { log } from "./lib/utils";
 
 const cliSymbol = process.argv[2]!;
 if (!cliSymbol) {

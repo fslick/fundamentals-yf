@@ -1,4 +1,4 @@
-import type moment from "moment";
+import type { DateTime } from "luxon";
 
 export type PeriodType = "3M" | "12M" | "TTM";
 
@@ -10,7 +10,7 @@ export type TrailingStatement = StatementPayload<"TTM">;
 
 export interface StatementPayload<T extends PeriodType> {
     TYPE: "ALL"
-    date: moment.Moment
+    date: DateTime
     sellingGeneralAndAdministration?: number;
     periodType: T;
     otherEquityAdjustments?: number;
