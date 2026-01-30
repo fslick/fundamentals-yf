@@ -7,6 +7,31 @@ import { log, memoize } from "../lib/utils";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"], });
 
+let yahooLogSuppressCount = 0;
+let originalConsoleLog: typeof console.log | null = null;
+
+async function withLibraryLoggingSuppressed<T>(fn: () => Promise<T>): Promise<T> {
+	if (yahooLogSuppressCount === 0) {
+		originalConsoleLog = console.log;
+		console.log = (...args: any[]) => {
+			if (args[0] === "Could not determine entry type:") {
+				return;
+			}
+			originalConsoleLog!(...args);
+		};
+	}
+	yahooLogSuppressCount += 1;
+	try {
+		return await fn();
+	} finally {
+		yahooLogSuppressCount -= 1;
+		if (yahooLogSuppressCount === 0 && originalConsoleLog) {
+			console.log = originalConsoleLog;
+			originalConsoleLog = null;
+		}
+	}
+}
+
 function payloadDateToMoment(dateInput: Date | number) {
     return typeof dateInput === "number" ? DateTime.fromSeconds(dateInput) : DateTime.fromJSDate(dateInput);
 }
@@ -18,17 +43,16 @@ async function saveJsonFile(symbol: string, type: string, data: any) {
 
 const defaultPeriod1 = DateTime.now().minus({ years: 5, months: 1 });
 
-const __fetchPrices = memoize(async (symbol: string) => {
+const __fetchPrices = memoize(async (symbol: string) => withLibraryLoggingSuppressed(async () => {
     const chart = await yahooFinance.chart(symbol, {
         period1: defaultPeriod1.toFormat("yyyy-MM-dd"),
         period2: DateTime.now().toFormat("yyyy-MM-dd"),
     });
-    log(`${symbol} >> Retrieved prices`);
     return chart.quotes;
-});
+}));
 
 const __fetchSummary = async (symbol: string) => {
-    const quoteSummary = await yahooFinance.quoteSummary(symbol,
+    const quoteSummary = await withLibraryLoggingSuppressed(() => yahooFinance.quoteSummary(symbol,
         {
             modules:
                 [
@@ -40,14 +64,13 @@ const __fetchSummary = async (symbol: string) => {
                     "summaryDetail",
                     "financialData",
                 ]
-        });
+        }));
     await saveJsonFile(symbol, "quoteSummary", quoteSummary);
-    log(`${symbol} >> Retrieved quoteSummary`);
     return quoteSummary;
 };
 
 const __fetchSummaryWithAllModules = async (symbol: string) => {
-    const quoteSummary = await yahooFinance.quoteSummary(symbol,
+    const quoteSummary = await withLibraryLoggingSuppressed(() => yahooFinance.quoteSummary(symbol,
         {
             modules:
                 [
@@ -79,47 +102,43 @@ const __fetchSummaryWithAllModules = async (symbol: string) => {
                     "topHoldings",
                     "upgradeDowngradeHistory"
                 ]
-        }, { validateResult: false });
+        }, { validateResult: false }));
     await saveJsonFile(symbol, "quoteSummaryAllModules", quoteSummary);
-    log(`${symbol} >> Retrieved quoteSummary (all modules)`);
     return quoteSummary;
 };
 
 const __fetchQuarterlyStatements = async (symbol: string) => {
-    const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+    const response: FundamentalsTimeSeriesAllResult[] = await withLibraryLoggingSuppressed(() => yahooFinance.fundamentalsTimeSeries(symbol, {
         period1: DateTime.now().minus({ years: 2 }).toFormat("yyyy-MM-dd"),
         type: "quarterly",
         module: "all"
-    }, { validateResult: false });
+    }, { validateResult: false }));
     await saveJsonFile(symbol, "quarterlyStatements", response);
-    log(`${symbol} >> Retrieved quarterly statements`);
     return response
         .filter(item => item.TYPE === "ALL")
         .map(item => ({ ...item, date: payloadDateToMoment(item.date) })) as QuarterlyStatement[];
 };
 
 const __fetchAnnualStatements = async (symbol: string) => {
-    const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+    const response: FundamentalsTimeSeriesAllResult[] = await withLibraryLoggingSuppressed(() => yahooFinance.fundamentalsTimeSeries(symbol, {
         period1: DateTime.now().minus({ years: 5 }).toFormat("yyyy-MM-dd"),
         period2: DateTime.now().toFormat("yyyy-MM-dd"),
         type: "annual",
         module: "all"
-    }, { validateResult: false });
+    }, { validateResult: false }));
     await saveJsonFile(symbol, "annualStatements", response);
-    log(`${symbol} >> Retrieved annual statements`);
     return response
         .filter(item => item.TYPE === "ALL")
         .map(item => ({ ...item, date: payloadDateToMoment(item.date) })) as AnnualStatement[];
 };
 
 const __fetchTrailingStatement = async (symbol: string) => {
-    const response: FundamentalsTimeSeriesAllResult[] = await yahooFinance.fundamentalsTimeSeries(symbol, {
+    const response: FundamentalsTimeSeriesAllResult[] = await withLibraryLoggingSuppressed(() => yahooFinance.fundamentalsTimeSeries(symbol, {
         period1: DateTime.now().minus({ years: 2 }).toFormat("yyyy-MM-dd"),
         type: "trailing",
         module: "all"
-    }, { validateResult: false });
+    }, { validateResult: false }));
     await saveJsonFile(symbol, "trailingStatement", response);
-    log(`${symbol} >> Retrieved trailing statement`);
     return response
         .filter(item => item.TYPE === "ALL")
         .map(item => ({ ...item, date: payloadDateToMoment(item.date) })) as unknown as TrailingStatement[];

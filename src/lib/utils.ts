@@ -16,3 +16,15 @@ export function memoize<T>(fn: (arg: string) => Promise<T>): (arg: string) => Pr
         return promise;
     };
 }
+
+export function flattenObject(obj: Record<string, unknown>, prefix = ""): Record<string, unknown> {
+    return Object.keys(obj).reduce((acc: Record<string, unknown>, k: string) => {
+        const pre = prefix.length ? prefix + "." : "";
+        if (typeof obj[k] === "object" && obj[k] !== null && !Array.isArray(obj[k]) && !(obj[k] instanceof Date) && !DateTime.isDateTime(obj[k])) {
+            Object.assign(acc, flattenObject(obj[k] as Record<string, unknown>, pre + k));
+        } else {
+            acc[pre + k] = obj[k];
+        }
+        return acc;
+    }, {});
+}
