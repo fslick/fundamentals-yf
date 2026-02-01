@@ -1,11 +1,8 @@
 import _ from "lodash";
 import { DateTime } from "luxon";
-import pLimit from "p-limit";
 import type { ChartResultArrayQuote } from "yahoo-finance2/modules/chart";
 import { fetchAnnualStatements, fetchPrices, fetchQuarterlyStatements, fetchSummary, fetchTrailingStats } from "./api/api";
-import { parseCsv, saveToCsv } from "./lib/csv";
 import type { AnnualStatement, PeriodType, QuarterlyStatement, StatementPayload } from "./api/types";
-import { log } from "./lib/utils";
 
 function priceOn(date: DateTime, prices: ChartResultArrayQuote[]) {
     const earliestPrice = _.minBy(prices, p => p.date);
