@@ -150,6 +150,9 @@ async function getTTMStatistics(
         ttmStatements = await convertCurrencyInStatements(trailingStats, statementCurrency, priceCurrency);
     }
 
+    const earliestPriceDate = DateTime.fromJSDate(_.minBy(prices, p => p.date)!.date).startOf("day");
+    ttmStatements = ttmStatements.filter(s => s.date.startOf("day") >= earliestPriceDate);
+
     if (ttmStatements.length === 0) {
         return null;
     }
@@ -225,8 +228,13 @@ export async function fetchFromYahooFinance(symbol: string) {
     const statementCurrency = quoteSummary.financialData?.financialCurrency;
 
     const prices = await fetchPrices(symbol);
+    const earliestPriceDate = DateTime.fromJSDate(_.minBy(prices, p => p.date)!.date).startOf("day");
+
     let annualStatements = quoteType === "EQUITY" ? await fetchAnnualStatements(symbol) : [];
     let quarterlyStatements = quoteType === "EQUITY" ? await fetchQuarterlyStatements(symbol) : [];
+
+    annualStatements = annualStatements.filter(s => s.date.startOf("day") >= earliestPriceDate);
+    quarterlyStatements = quarterlyStatements.filter(s => s.date.startOf("day") >= earliestPriceDate);
 
     if (priceCurrency && statementCurrency && priceCurrency !== statementCurrency) {
         annualStatements = await convertCurrencyInStatements(annualStatements, statementCurrency!, priceCurrency!);
