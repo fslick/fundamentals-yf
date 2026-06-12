@@ -2,6 +2,8 @@ import { promises as fs } from "fs";
 import { DateTime } from "luxon";
 import YahooFinance from "yahoo-finance2";
 import type { FundamentalsTimeSeriesAllResult } from "yahoo-finance2/modules/fundamentalsTimeSeries";
+import type { ChartResultObject, ChartResultArrayQuote } from "yahoo-finance2/modules/chart";
+import type { QuoteSummaryResult } from "yahoo-finance2/modules/quoteSummary";
 import type { AnnualStatement, QuarterlyStatement, TrailingStatement } from "./types";
 import { log, memoize } from "../lib/utils";
 
@@ -11,25 +13,25 @@ let yahooLogSuppressCount = 0;
 let originalConsoleLog: typeof console.log | null = null;
 
 async function withLibraryLoggingSuppressed<T>(fn: () => Promise<T>): Promise<T> {
-	if (yahooLogSuppressCount === 0) {
-		originalConsoleLog = console.log;
-		console.log = (...args: any[]) => {
-			if (args[0] === "Could not determine entry type:") {
-				return;
-			}
-			originalConsoleLog!(...args);
-		};
-	}
-	yahooLogSuppressCount += 1;
-	try {
-		return await fn();
-	} finally {
-		yahooLogSuppressCount -= 1;
-		if (yahooLogSuppressCount === 0 && originalConsoleLog) {
-			console.log = originalConsoleLog;
-			originalConsoleLog = null;
-		}
-	}
+    if (yahooLogSuppressCount === 0) {
+        originalConsoleLog = console.log;
+        console.log = (...args: any[]) => {
+            if (args[0] === "Could not determine entry type:") {
+                return;
+            }
+            originalConsoleLog!(...args);
+        };
+    }
+    yahooLogSuppressCount += 1;
+    try {
+        return await fn();
+    } finally {
+        yahooLogSuppressCount -= 1;
+        if (yahooLogSuppressCount === 0 && originalConsoleLog) {
+            console.log = originalConsoleLog;
+            originalConsoleLog = null;
+        }
+    }
 }
 
 function payloadDateToMoment(dateInput: Date | number) {
@@ -47,7 +49,7 @@ const __fetchPrices = memoize(async (symbol: string) => withLibraryLoggingSuppre
     const chart = await yahooFinance.chart(symbol, {
         period1: defaultPeriod1.toFormat("yyyy-MM-dd"),
         period2: DateTime.now().toFormat("yyyy-MM-dd"),
-    });
+    }, { validateResult: false }) as unknown as ChartResultObject;
     return chart.quotes;
 }));
 
@@ -64,7 +66,7 @@ const __fetchSummary = async (symbol: string) => {
                     "summaryDetail",
                     "financialData",
                 ]
-        }));
+        }, { validateResult: false }) as unknown as Promise<QuoteSummaryResult>);
     await saveJsonFile(symbol, "quoteSummary", quoteSummary);
     return quoteSummary;
 };
@@ -157,12 +159,12 @@ async function withRetries<T>(fn: () => Promise<T>, symbol: string, methodName: 
     }
 }
 
-export async function fetchPrices(symbol: string) {
-    return withRetries(() => __fetchPrices(symbol), symbol, "fetchPrices");
+export async function fetchPrices(symbol: string): Promise<ChartResultArrayQuote[]> {
+    return withRetries(() => __fetchPrices(symbol), symbol, "fetchPrices") as Promise<ChartResultArrayQuote[]>;
 }
 
-export async function fetchSummary(symbol: string) {
-    return withRetries(() => __fetchSummary(symbol), symbol, "fetchSummary");
+export async function fetchSummary(symbol: string): Promise<QuoteSummaryResult> {
+    return withRetries(() => __fetchSummary(symbol), symbol, "fetchSummary") as Promise<QuoteSummaryResult>;
 }
 
 export async function fetchSummaryWithAllModules(symbol: string) {
